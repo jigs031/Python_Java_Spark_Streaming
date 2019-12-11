@@ -1,0 +1,80 @@
+#
+# Python 3.7
+# pip install kafka-python
+# pip install request
+# pip install threading
+# pip install json
+
+from kafka import KafkaConsumer
+from kafka import KafkaProducer
+from json import loads
+import requests
+import threading
+import json
+import time
+import re
+
+#REst end point URL
+URL = "http://webservices.gama-system.com/exchangerates.asmx?op=GetExchangeRate"
+querystring = {"op":"GetExchangeRate"}
+
+
+#Create Producer Thread to produce dummy messages
+class Producer(threading.Thread):
+    daemon = True
+    def run(self):
+        producer = KafkaProducer(bootstrap_servers='victoria.com:6667',
+                                 value_serializer=lambda v: json.dumps(v).encode('utf-8'))
+        while True:
+            producer.send('topic1', {"strBank": "BS","strCurrency":"ATS","strDate":"2019-09-08","rank":1})
+            producer.send('topic1', {"strBank": "NLB","strCurrency":"BEF","strDate":"2019-09-11","rank":1})
+
+
+#Create Consumer Thread to Consume, Parse and Call the Rest Service
+class Consumer(threading.Thread):
+    print("Starting Consumer")
+    def parseResponse(self,xmlstr):
+        x=re.findall(r"<GetExchangeRateResult>(.*)<\/GetExchangeRateResult>",xmlstr)
+        if len(x) >0 :
+            return x[0]
+        else:
+            return -10
+
+    def run(self):
+        consumer = KafkaConsumer(
+        'topic1',
+         bootstrap_servers=['207.180.248.193:9092'],
+         auto_offset_reset='earliest',
+         enable_auto_commit=True,
+         group_id='my-group',
+         value_deserializer=lambda x: x.decode('utf-8'))
+        print ("Waiting for the Message..")
+        for message in consumer:
+            try:
+                print("Message Received..")
+                message = loads( message.value )
+                print(message)
+                print("Sending the Rest Request")
+                payload = "<?xml version=\"1.0\" encoding=\"utf-8\"?> <soap:Envelope xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\"> <soap:Body> <GetExchangeRate xmlns=\"http://www.gama-system.com/webservices\"> <strBank>"+message['strBank'] +"</strBank><strCurrency>"+str(message['strCurrency'])+"</strCurrency><strDate>"+str(message['strDate'])+"</strDate><intRank>"+str(message['rank'])+"</intRank></GetExchangeRate></soap:Body></soap:Envelope>"
+                headers = {'content-type': "text/xml"}
+                response = requests.request("POST", URL, data=payload, headers=headers, params=querystring)
+                print(self.parseResponse(response.text))
+            except Exception as e:
+                print("Exception Occured while Parsing. Skipping the Message")
+                print(e)
+
+def main():
+    threads = [
+        Consumer(),
+        Consumer()
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+if __name__ == "__main__":
+    main()
+
+
+

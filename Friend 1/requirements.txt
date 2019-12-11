@@ -1,0 +1,7 @@
+pyspark>=2.4.0
+kafka-python>=1.4.7
+hdfs>=2.5.0
+pyhive
+sasl
+thrift
+thrift-sasl
